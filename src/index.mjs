@@ -1,5 +1,5 @@
 /**
- * dsh-agent-guard · Host 入口。
+ * dsh-sentinel · Host 入口。
  */
 
 import { Config, LOOP_DEFAULTS, MODE_DEFAULTS } from './config.mjs'
@@ -15,7 +15,7 @@ import {
 } from './guards.mjs'
 import { applyModeGuard } from './mode-guard.mjs'
 
-export const name = 'agent-guard'
+export const name = 'sentinel'
 export { Config } from './config.mjs'
 export * from './lib/detectors.mjs'
 

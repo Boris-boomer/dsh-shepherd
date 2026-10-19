@@ -1,10 +1,10 @@
 /**
- * dsh-agent-guard · 合并配置 schema。
+ * dsh-sentinel · 合并配置 schema。
  */
 
 import z from '@deepseek-ai/schemastery'
 
-export const NS = 'agent-guard'
+export const NS = 'sentinel'
 
 // ===================== 循环守卫（loop） =====================
 

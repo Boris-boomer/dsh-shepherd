@@ -1,13 +1,13 @@
 /**
- * dsh-agent-guard · Client 浮窗。
+ * dsh-sentinel · Client 浮窗。
  */
 
 import { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { FC, ReactElement } from 'react'
 
-const REGISTRY_ID = 'agent-guard'
-const NS = 'agent-guard'
+const REGISTRY_ID = 'sentinel'
+const NS = 'sentinel'
 const MODES = ['planning', 'coding', 'verify'] as const
 type Mode = typeof MODES[number]
 const MODE_ICONS: Record<Mode, string> = { planning: '📋', coding: '⌨️', verify: '🚀' }
@@ -55,7 +55,7 @@ async function writeField(ctx: any, path: string, next: unknown, base?: Record<s
       : undefined
     await ctx.remote.settings.update(NS, setAt(base ?? {}, path, next), revision)
   } catch (cause) {
-    console.warn('[agent-guard] settings update failed', cause instanceof Error ? cause.message : cause)
+    console.warn('[sentinel] settings update failed', cause instanceof Error ? cause.message : cause)
   }
 }
 
@@ -64,7 +64,7 @@ async function writeField(ctx: any, path: string, next: unknown, base?: Record<s
 interface PendingItem { id: string; tool: string }
 
 async function callBackend(ctx: any, method: string, ...args: unknown[]) {
-  const wrapped = await (ctx as any).connection.rpc.call('/api', `agent-guard/${method}`, {
+  const wrapped = await (ctx as any).connection.rpc.call('/api', `sentinel/${method}`, {
     args: args.length === 0 ? {} : args.length === 1 ? args[0] : args,
   }) as { ok?: boolean; value?: unknown; error?: { message?: string } } | undefined
   if (!wrapped || wrapped.ok !== true) throw new Error(wrapped?.error?.message ?? 'RPC 调用失败')
@@ -164,19 +164,13 @@ const ModeTab: FC<ModeTabProps> = ({ ctx, snapshot, onModeChange }): ReactElemen
     let alive = true
     const load = async () => {
       try {
-        const q = await callBackend(ctx, 'getQueue') // 原接口如果还存在请换成 getState 内的 pending
-        if (alive && Array.isArray(q)) setQueue(q)
-      } catch {
-        // 回退测试 getState
-        try {
-          const state = await callBackend(ctx, 'getState')
-          if (alive && state && Array.isArray(state.pending)) setQueue(state.pending)
-        } catch {}
-      }
+        const state = await callBackend(ctx, 'getState')
+        if (alive && state && Array.isArray(state.pending)) setQueue(state.pending)
+      } catch {}
     }
     void load()
-    const offQueue = ctx.on('agent-guard/mode/queue-updated', (q: PendingItem[]) => setQueue(q)) as unknown as () => void
-    const offMode = ctx.on('agent-guard/mode/mode-changed', () => load()) as unknown as () => void
+    const offQueue = ctx.on('sentinel/mode/queue-updated', (q: PendingItem[]) => setQueue(q)) as unknown as () => void
+    const offMode = ctx.on('sentinel/mode/mode-changed', () => load()) as unknown as () => void
     return () => { alive = false; offQueue(); offMode() }
   }, [ctx])
 
@@ -200,12 +194,6 @@ const ModeTab: FC<ModeTabProps> = ({ ctx, snapshot, onModeChange }): ReactElemen
         ) : queue.map(item => (
           <div key={item.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid #f0f0f0', fontSize: 13 }}>
             <span style={{ fontFamily: 'monospace', fontSize: 12, color: '#333' }}>{item.tool}</span>
-            <button onClick={() => void callBackend(ctx, 'executeOne', item.id).then(() => {
-              const q = callBackend(ctx, 'getQueue'); q.then(v => Array.isArray(v) && setQueue(v))
-            })} style={{
-              background: '#0969da', color: '#fff', border: 'none', borderRadius: 4,
-              padding: '2px 10px', fontSize: 12, cursor: 'pointer',
-            }}>▶</button>
           </div>
         ))}
       </div>
@@ -234,7 +222,7 @@ const PanelContent: FC<PanelProps> = ({ ctx, snapshot, onToggle, onModeChange })
         display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0,
         cursor: 'grab', userSelect: 'none',
       }}>
-        <span>🛡️ Agent Guard</span>
+        <span>🛡️ Sentinel</span>
         <button onClick={() => { if (floatingContainer) floatingContainer.style.display = 'none' }}
           style={{ background: 'none', border: 'none', color: '#fff', fontSize: 16, cursor: 'pointer', padding: '0 4px' }}>✕</button>
       </div>
@@ -305,7 +293,7 @@ export function apply(ctx: any): void {
     id: string; icon: string; label: string; packageName?: string; onClick?: () => void
   }>
   registry.push({
-    id: REGISTRY_ID, icon: '🛡️', label: 'Agent Guard', packageName: 'dsh-agent-guard',
+    id: REGISTRY_ID, icon: '🛡️', label: 'Sentinel', packageName: 'dsh-sentinel',
     onClick: () => {
       if (!floatingContainer) return
       const visible = floatingContainer.style.display === 'flex'

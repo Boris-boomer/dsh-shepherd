@@ -1,5 +1,5 @@
 /**
- * dsh-agent-guard · 模式守卫（带调试日志）。
+ * dsh-sentinel · 模式守卫。
  */
 
 import fs from 'node:fs'
@@ -19,7 +19,7 @@ const MODE_LABEL = {
 let lastGated = null
 let gatedCount = 0
 
-const AUDIT_DIR = path.join(os.homedir(), '.dsh', 'agent-guard')
+const AUDIT_DIR = path.join(os.homedir(), '.dsh', 'sentinel')
 const AUDIT_FILE = path.join(AUDIT_DIR, 'audit.jsonl')
 
 function ensureAuditDir() {
@@ -29,7 +29,7 @@ function ensureAuditDir() {
 function writeAuditLog(agentId, toolName, mode, decision, reason) {
   ensureAuditDir()
   const entry = JSON.stringify({ timestamp: new Date().toISOString(), agentId, toolName, mode, decision, reason }) + '\n'
-  try { fs.appendFileSync(AUDIT_FILE, entry) } catch (err) { console.warn('[agent-guard] Failed to write audit log', err) }
+  try { fs.appendFileSync(AUDIT_FILE, entry) } catch (err) { console.warn('[sentinel] Failed to write audit log', err) }
 }
 
 function viewGate(mode) {
@@ -37,23 +37,14 @@ function viewGate(mode) {
 }
 
 export function applyModeGuard(ctx, getConfig) {
-  console.log('[agent-guard] applying Mode Guard')
-
-  // 1. 挂载 RPC
-  try {
-    ctx.connection.rpc.handle('agent-guard/getState', async () => viewGate(getConfig().mode))
-    ctx.connection.rpc.handle('agent-guard/clearGateView', async () => {
-      lastGated = null
-      return { success: true }
-    })
-    console.log('[agent-guard] RPC handlers registered')
-  } catch (err) {
-    console.error('[agent-guard] RPC registration failed:', err)
-  }
+  ctx.connection.rpc.handle('sentinel/getState', async () => viewGate(getConfig().mode))
+  ctx.connection.rpc.handle('sentinel/clearGateView', async () => {
+    lastGated = null
+    return { success: true }
+  })
 
   const denyCounts = new WeakMap()
 
-  // 2. 工具调用闸门
   ctx.on('tools/pre-execute', async (exec, next) => {
     const cfg = getConfig()
     if (!cfg || cfg.enabled === false) return next()
@@ -62,30 +53,26 @@ export function applyModeGuard(ctx, getConfig) {
     const toolName = exec?.name
     const agent = exec?.agent
 
-    // 🚨 调试点 4：捕获所有工具调用
-    console.log(`[agent-guard] tools/pre-execute caught: ${toolName}, mode: ${mode}`)
-
     if (!MODE_GATES_TOOLS[mode] || !toolName || !cfg.blacklist.includes(toolName)) {
       return next()
     }
 
     const currentRetries = denyCounts.get(agent)?.get(toolName) || 0
     if (currentRetries >= 3) {
-      console.warn('[agent-guard] 🚨 熔断触发！拒绝工具:', toolName)
       writeAuditLog(agent?.id, toolName, mode, 'deny', '熔断：多次重试被拒工具')
       return {
         kind: 'deny',
-        reason: `agent-guard 熔断：工具「${toolName}」已被拒绝超过 3 次。请停止尝试该工具，改换思路或向用户说明。`,
+        reason: `sentinel 熔断：工具「${toolName}」已被拒绝超过 3 次。请停止尝试该工具，改换思路或向用户说明。`,
       }
     }
 
     lastGated = { id: String(++gatedCount), tool: toolName, at: Date.now() }
     writeAuditLog(agent?.id, toolName, mode, 'ask', '黑名单拦截，等待审批')
-    console.warn(`[agent-guard] ⏸ 拦截触发：${MODE_LABEL[mode]}：工具 ${toolName} 需要审批`)
+    console.warn(`[sentinel] ⏸  ${MODE_LABEL[mode]}：工具 ${toolName} 需要审批`)
 
     return {
       kind: 'ask',
-      reason: `agent-guard 处于 coding 模式：工具「${toolName}」在黑名单中，需要你批准后才会执行。`,
+      reason: `sentinel 处于 coding 模式：工具「${toolName}」在黑名单中，需要你批准后才会执行。`,
       displayReason: {
         en: `Tool "${toolName}" requires your approval in coding mode.`,
         zh: `coding 模式下工具「${toolName}」需要你批准后才会执行。`,
@@ -93,7 +80,6 @@ export function applyModeGuard(ctx, getConfig) {
     }
   })
 
-  // 3. 监听结果，处理拒绝熔断计数
   ctx.on('tools/post-execute', async (exec, result, next) => {
     const cfg = getConfig()
     if (!cfg || !MODE_GATES_TOOLS[cfg.mode]) return next()
@@ -112,7 +98,6 @@ export function applyModeGuard(ctx, getConfig) {
     return next()
   })
 
-  // 清理状态
   ctx.on('agent/turn-stopping', ({ agent }) => {
     denyCounts.delete(agent)
   })
