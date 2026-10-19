@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Agent Guard",
+    "description": "Keeps the agent unstuck and on policy: six loop/stall detectors that interrupt doom loops, plus planning/coding/verify modes that gate sensitive tools behind approval."
+  }
+}

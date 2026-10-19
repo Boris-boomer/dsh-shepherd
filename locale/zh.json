@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Agent 守卫",
+    "description": "让 agent 不卡死也不越界：6 个循环/空转检测器自动打断死循环，planning/coding/verify 三模式把敏感工具拦进审批。"
+  }
+}

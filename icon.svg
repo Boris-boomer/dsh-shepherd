@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Agent Guard">
+  <defs>
+    <linearGradient id="ag-shield" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3b82f6"/>
+      <stop offset="1" stop-color="#1d4ed8"/>
+    </linearGradient>
+  </defs>
+  <path d="M32 4 L56 13 V31 C56 45 46 55 32 60 C18 55 8 45 8 31 V13 Z" fill="url(#ag-shield)"/>
+  <path d="M32 4 L56 13 V31 C56 45 46 55 32 60 C18 55 8 45 8 31 V13 Z"
+        fill="none" stroke="#0b2d6b" stroke-width="2" stroke-linejoin="round" opacity="0.55"/>
+  <g fill="none" stroke="#ffffff" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M22 34 a10 10 0 1 1 4 8"/>
+  </g>
+  <path d="M18 38 l-4 -6 l7 -3 z" fill="#ffffff"/>
+</svg>
