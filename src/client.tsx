@@ -1,13 +1,14 @@
 /**
- * dsh-sentinel · Client 浮窗。
+ * dsh-shepherd · Client 浮窗。
  */
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { FC, ReactElement } from 'react'
 
-const REGISTRY_ID = 'sentinel'
-const NS = 'sentinel'
+const REGISTRY_ID = 'shepherd'
+const NS = 'shepherd'
+const AUDIT_ROUTE = '/plugins/dsh-shepherd/audit'
 const MODES = ['planning', 'coding', 'verify'] as const
 type Mode = typeof MODES[number]
 const MODE_ICONS: Record<Mode, string> = { planning: '📋', coding: '⌨️', verify: '🚀' }
@@ -55,20 +56,8 @@ async function writeField(ctx: any, path: string, next: unknown, base?: Record<s
       : undefined
     await ctx.remote.settings.update(NS, setAt(base ?? {}, path, next), revision)
   } catch (cause) {
-    console.warn('[sentinel] settings update failed', cause instanceof Error ? cause.message : cause)
+    console.warn('[shepherd] settings update failed', cause instanceof Error ? cause.message : cause)
   }
-}
-
-// ===================== RPC 通信 =====================
-
-interface PendingItem { id: string; tool: string }
-
-async function callBackend(ctx: any, method: string, ...args: unknown[]) {
-  const wrapped = await (ctx as any).connection.rpc.call('/api', `sentinel/${method}`, {
-    args: args.length === 0 ? {} : args.length === 1 ? args[0] : args,
-  }) as { ok?: boolean; value?: unknown; error?: { message?: string } } | undefined
-  if (!wrapped || wrapped.ok !== true) throw new Error(wrapped?.error?.message ?? 'RPC 调用失败')
-  return wrapped.value
 }
 
 // ===================== 浮动容器 =====================
@@ -102,6 +91,24 @@ function createFloatingContainer(): HTMLDivElement {
   const orig = container.remove.bind(container)
   container.remove = () => { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); orig() }
   return container
+}
+
+// ===================== 审计记录 =====================
+
+interface AuditEntry {
+  timestamp: string
+  agentId?: string
+  toolName: string
+  mode: string
+  decision: string
+  reason: string
+}
+
+const DECISION_COLOR: Record<string, string> = {
+  deny: '#d1242f',
+  ask: '#bf8700',
+  error: '#d1242f',
+  ok: '#2d7d46',
 }
 
 // ===================== React 面板 =====================
@@ -157,22 +164,31 @@ interface ModeTabProps {
   onModeChange: (mode: Mode) => void
 }
 const ModeTab: FC<ModeTabProps> = ({ ctx, snapshot, onModeChange }): ReactElement => {
-  const [queue, setQueue] = useState<PendingItem[]>([])
   const mode = (getAt(snapshot, 'mode.mode') as Mode) ?? 'planning'
+  const [audit, setAudit] = useState<AuditEntry[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const loadAudit = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await fetch(AUDIT_ROUTE, { cache: 'no-store' })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = await res.json()
+      setAudit(Array.isArray(data) ? data : [])
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '请求失败')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
 
   useEffect(() => {
-    let alive = true
-    const load = async () => {
-      try {
-        const state = await callBackend(ctx, 'getState')
-        if (alive && state && Array.isArray(state.pending)) setQueue(state.pending)
-      } catch {}
-    }
-    void load()
-    const offQueue = ctx.on('sentinel/mode/queue-updated', (q: PendingItem[]) => setQueue(q)) as unknown as () => void
-    const offMode = ctx.on('sentinel/mode/mode-changed', () => load()) as unknown as () => void
-    return () => { alive = false; offQueue(); offMode() }
-  }, [ctx])
+    void loadAudit()
+    const timer = setInterval(() => { void loadAudit() }, 3000)
+    return () => clearInterval(timer)
+  }, [loadAudit, mode])
 
   const switchMode = (next: Mode) => { if (next !== mode) onModeChange(next) }
 
@@ -188,14 +204,55 @@ const ModeTab: FC<ModeTabProps> = ({ ctx, snapshot, onModeChange }): ReactElemen
           }}>{MODE_ICONS[m]} {m.charAt(0).toUpperCase() + m.slice(1)}</button>
         ))}
       </div>
+
       <div style={{ flex: 1, overflowY: 'auto', padding: '8px 12px' }}>
-        {queue.length === 0 ? (
-          <div style={{ color: '#888', fontSize: 13, textAlign: 'center', padding: '12px 0' }}>📭 挂起队列为空</div>
-        ) : queue.map(item => (
-          <div key={item.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid #f0f0f0', fontSize: 13 }}>
-            <span style={{ fontFamily: 'monospace', fontSize: 12, color: '#333' }}>{item.tool}</span>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: '#161616' }}>最近拦截记录</span>
+          <button onClick={loadAudit} disabled={loading} style={{
+            fontSize: 11, padding: '3px 8px', borderRadius: 4, border: '1px solid #ccc',
+            background: '#f5f5f5', cursor: loading ? 'wait' : 'pointer',
+          }}>
+            {loading ? '刷新中…' : '刷新'}
+          </button>
+        </div>
+
+        {error ? (
+          <div style={{ fontSize: 12, color: '#d1242f', padding: '8px 0' }}>
+            {error}
+            <div style={{ marginTop: 6, fontSize: 11, color: '#8a8a8a' }}>
+              完整记录见 <code>~/.dsh/shepherd/audit.jsonl</code>
+            </div>
           </div>
-        ))}
+        ) : audit.length === 0 ? (
+          <div style={{ fontSize: 12, color: '#8a8a8a', textAlign: 'center', padding: '12px 0' }}>
+            暂无拦截记录
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {audit.slice().reverse().map((entry, i) => {
+              const color = DECISION_COLOR[entry.decision] || '#6a737d'
+              return (
+                <div key={i} style={{
+                  fontSize: 11, padding: '5px 7px', background: '#f6f8fa',
+                  borderRadius: 4, borderLeft: `3px solid ${color}`,
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 6 }}>
+                    <span style={{ color, fontWeight: 600 }}>{entry.decision.toUpperCase()}</span>
+                    <span style={{ color: '#8a8a8a' }}>
+                      {new Date(entry.timestamp).toLocaleTimeString()}
+                    </span>
+                  </div>
+                  <div style={{ color: '#3a3a3a', marginTop: 2 }}>
+                    {entry.toolName} · {entry.mode}
+                  </div>
+                  {entry.reason && (
+                    <div style={{ color: '#6a737d', marginTop: 1 }}>{entry.reason}</div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -209,12 +266,14 @@ interface PanelProps {
 }
 const PanelContent: FC<PanelProps> = ({ ctx, snapshot, onToggle, onModeChange }): ReactElement => {
   const [tab, setTab] = useState<'loop' | 'mode'>('loop')
+
   const tabStyle = (active: boolean) => ({
     flex: 1, padding: '7px 0', borderRadius: 6, border: '1px solid #ccc',
     background: active ? '#0969da' : '#f5f5f5',
-    color: active ? '#fff' : '#333', fontWeight: (active ? 'bold' : 'normal') as const,
+    color: active ? '#fff' : '#333', fontWeight: active ? 'bold' : 'normal',
     cursor: 'pointer', fontSize: 13,
   })
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div className="panel-header" style={{
@@ -222,7 +281,7 @@ const PanelContent: FC<PanelProps> = ({ ctx, snapshot, onToggle, onModeChange })
         display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0,
         cursor: 'grab', userSelect: 'none',
       }}>
-        <span>🛡️ Sentinel</span>
+        <span>🐑 Shepherd</span>
         <button onClick={() => { if (floatingContainer) floatingContainer.style.display = 'none' }}
           style={{ background: 'none', border: 'none', color: '#fff', fontSize: 16, cursor: 'pointer', padding: '0 4px' }}>✕</button>
       </div>
@@ -241,7 +300,7 @@ const PanelContent: FC<PanelProps> = ({ ctx, snapshot, onToggle, onModeChange })
 
 // ===================== 入口 =====================
 
-export const inject = ['remote', 'remote.settings', 'connection']
+export const inject = ['remote', 'remote.settings']
 
 let floatingRoot: ReturnType<typeof createRoot> | null = null
 let floatingContainer: HTMLDivElement | null = null
@@ -293,7 +352,7 @@ export function apply(ctx: any): void {
     id: string; icon: string; label: string; packageName?: string; onClick?: () => void
   }>
   registry.push({
-    id: REGISTRY_ID, icon: '🛡️', label: 'Sentinel', packageName: 'dsh-sentinel',
+    id: REGISTRY_ID, icon: '🐑', label: 'Shepherd', packageName: 'dsh-shepherd',
     onClick: () => {
       if (!floatingContainer) return
       const visible = floatingContainer.style.display === 'flex'

@@ -1,10 +1,10 @@
 /**
- * dsh-sentinel · 合并配置 schema。
+ * dsh-shepherd · 合并配置 schema。
  */
 
 import z from '@deepseek-ai/schemastery'
 
-export const NS = 'sentinel'
+export const NS = 'shepherd'
 
 // ===================== 循环守卫（loop） =====================
 

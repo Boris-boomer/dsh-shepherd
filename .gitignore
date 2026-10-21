@@ -1,3 +1,8 @@
 ﻿node_modules/
+lib/
+*.jsonl
 *.log
+.audit/
 .DS_Store
+.vscode/
+.idea/

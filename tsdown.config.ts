@@ -14,7 +14,7 @@ const PLATFORM_EXTERNALS = [
 const isRequested = (specifier: string): boolean => PLATFORM_EXTERNALS.includes(specifier)
 
 const client: UserConfig = {
-  name: 'dsh-agent-guard/client',
+  name: 'dsh-shepherd/client',
   entry: { client: 'src/client.tsx' },
   outDir: 'lib',
   format: ['cjs'],
@@ -35,7 +35,7 @@ const client: UserConfig = {
   outputOptions: {
     entryFileNames: 'client.js',
     sourcemapExcludeSources: false,
-    banner: `window.__ModuleLoader__.load({ id: ${JSON.stringify('dsh-agent-guard')}, factory: (require) => {`,
+    banner: `window.__ModuleLoader__.load({ id: ${JSON.stringify('dsh-shepherd')}, factory: (require) => {`,
     footer: 'return module.exports; } });',
     intro: 'var module = { exports: {} }; var exports = module.exports;',
   },

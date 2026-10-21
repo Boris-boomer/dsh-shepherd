@@ -1,17 +1,21 @@
 {
-  "name": "dsh-sentinel",
+  "name": "dsh-shepherd",
   "description": "Agent 行为守卫合一插件：7 个循环/空转/假完成检测器 + planning/coding/verify 模式守卫与原生审批熔断。",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "main": "src/index.mjs",
   "scripts": {
     "build": "tsdown",
-    "test": "node test/guard.test.mjs"
+    "test": "node --test test/guard.test.mjs test/integration.test.mjs"
   },
   "exports": {
-    ".": { "default": "./src/index.mjs" },
-    "./client": { "default": "./lib/client.js" },
+    ".": {
+      "default": "./src/index.mjs"
+    },
+    "./client": {
+      "default": "./lib/client.js"
+    },
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./locale/*.json": "./locale/*.json",
     "./icon": "./icon.svg",
@@ -26,8 +30,15 @@
   ],
   "license": "MIT",
   "dsh": {
-    "client": { "platform": "web", "inject": ["dsh-sentinel"] },
-    "bundle": { "patch": "./cordis.patch.yml" }
+    "client": {
+      "platform": "web",
+      "inject": [
+        "dsh-shepherd"
+      ]
+    },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": ">=4.0.0 <5.0.0",
@@ -39,12 +50,15 @@
     "@deepseek-ai/schemastery": "^3.18.0"
   },
   "devDependencies": {
+    "@types/node": "^26.6.5",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "tsdown": "^0.23.0",
     "typescript": "^7.0.2"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild"]
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   }
 }

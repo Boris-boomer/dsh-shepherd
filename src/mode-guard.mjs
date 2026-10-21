@@ -1,5 +1,7 @@
 /**
- * dsh-sentinel · 模式守卫。
+ * dsh-shepherd · 模式守卫。
+ * 失败计数生命周期与会话/用户消息边界对齐，而非回合。
+ * 审计记录同时写 JSONL（持久化）和内存环形缓冲区（供前端浮窗展示）。
  */
 
 import fs from 'node:fs'
@@ -16,34 +18,48 @@ const MODE_LABEL = {
   verify: 'verify（验证中，放行执行类工具）',
 }
 
-let lastGated = null
-let gatedCount = 0
-
-const AUDIT_DIR = path.join(os.homedir(), '.dsh', 'sentinel')
+const AUDIT_DIR = path.join(os.homedir(), '.dsh', 'shepherd')
 const AUDIT_FILE = path.join(AUDIT_DIR, 'audit.jsonl')
+
+const MAX_RECENT_AUDIT = 50
+const recentAudit = []
 
 function ensureAuditDir() {
   try { if (!fs.existsSync(AUDIT_DIR)) fs.mkdirSync(AUDIT_DIR, { recursive: true }) } catch {}
 }
 
-function writeAuditLog(agentId, toolName, mode, decision, reason) {
+function recordAudit(agentId, toolName, mode, decision, reason) {
+  const entry = {
+    timestamp: new Date().toISOString(),
+    agentId,
+    toolName,
+    mode,
+    decision,
+    reason,
+  }
+  recentAudit.push(entry)
+  if (recentAudit.length > MAX_RECENT_AUDIT) recentAudit.shift()
+
   ensureAuditDir()
-  const entry = JSON.stringify({ timestamp: new Date().toISOString(), agentId, toolName, mode, decision, reason }) + '\n'
-  try { fs.appendFileSync(AUDIT_FILE, entry) } catch (err) { console.warn('[sentinel] Failed to write audit log', err) }
+  try { fs.appendFileSync(AUDIT_FILE, JSON.stringify(entry) + '\n') } catch (err) {
+    console.warn('[shepherd] Failed to write audit log', err)
+  }
+  return entry
 }
 
-function viewGate(mode) {
-  return { mode, pending: lastGated ? [lastGated] : [], total: gatedCount }
+export function getRecentAudit() {
+  return recentAudit.slice()
 }
 
 export function applyModeGuard(ctx, getConfig) {
-  ctx.connection.rpc.handle('sentinel/getState', async () => viewGate(getConfig().mode))
-  ctx.connection.rpc.handle('sentinel/clearGateView', async () => {
-    lastGated = null
-    return { success: true }
-  })
-
   const denyCounts = new WeakMap()
+
+  ctx.on('agent/pre-step', ({ agent, messages }, next) => {
+    if (agent && messages?.some(m => m.source?.kind === 'user')) {
+      denyCounts.delete(agent)
+    }
+    return next()
+  })
 
   ctx.on('tools/pre-execute', async (exec, next) => {
     const cfg = getConfig()
@@ -53,26 +69,24 @@ export function applyModeGuard(ctx, getConfig) {
     const toolName = exec?.name
     const agent = exec?.agent
 
-    if (!MODE_GATES_TOOLS[mode] || !toolName || !cfg.blacklist.includes(toolName)) {
-      return next()
-    }
+    if (!MODE_GATES_TOOLS[mode] || !toolName || !cfg.blacklist.includes(toolName)) return next()
+    if (!agent) return next()
 
     const currentRetries = denyCounts.get(agent)?.get(toolName) || 0
     if (currentRetries >= 3) {
-      writeAuditLog(agent?.id, toolName, mode, 'deny', '熔断：多次重试被拒工具')
+      recordAudit(agent?.id, toolName, mode, 'deny', '熔断：多次重试被拒工具')
       return {
         kind: 'deny',
-        reason: `sentinel 熔断：工具「${toolName}」已被拒绝超过 3 次。请停止尝试该工具，改换思路或向用户说明。`,
+        reason: `shepherd 熔断：工具「${toolName}」已被拒绝超过 3 次。请停止尝试该工具，改换思路或向用户说明。`,
       }
     }
 
-    lastGated = { id: String(++gatedCount), tool: toolName, at: Date.now() }
-    writeAuditLog(agent?.id, toolName, mode, 'ask', '黑名单拦截，等待审批')
-    console.warn(`[sentinel] ⏸  ${MODE_LABEL[mode]}：工具 ${toolName} 需要审批`)
+    recordAudit(agent?.id, toolName, mode, 'ask', '黑名单拦截，等待审批')
+    console.warn(`[shepherd] ⏸  ${MODE_LABEL[mode]}：工具 ${toolName} 需要审批`)
 
     return {
       kind: 'ask',
-      reason: `sentinel 处于 coding 模式：工具「${toolName}」在黑名单中，需要你批准后才会执行。`,
+      reason: `shepherd 处于 coding 模式：工具「${toolName}」在黑名单中，需要你批准后才会执行。`,
       displayReason: {
         en: `Tool "${toolName}" requires your approval in coding mode.`,
         zh: `coding 模式下工具「${toolName}」需要你批准后才会执行。`,
@@ -86,19 +100,19 @@ export function applyModeGuard(ctx, getConfig) {
 
     const toolName = exec?.name
     const agent = exec?.agent
+    if (!agent || !toolName) return next()
+    if (!cfg.blacklist.includes(toolName)) return next()
 
-    if (toolName && cfg.blacklist.includes(toolName) && result?.isError) {
-      const agentCounts = denyCounts.get(agent) || new Map()
+    const agentCounts = denyCounts.get(agent) || new Map()
+    if (result?.isError) {
       const count = (agentCounts.get(toolName) || 0) + 1
       agentCounts.set(toolName, count)
-      denyCounts.set(agent, agentCounts)
-      
-      writeAuditLog(agent?.id, toolName, cfg.mode, 'error', `执行失败或被拒，当前计数: ${count}`)
+      recordAudit(agent?.id, toolName, cfg.mode, 'error', `执行失败或被拒，当前计数: ${count}`)
+    } else {
+      agentCounts.delete(toolName)
+      recordAudit(agent?.id, toolName, cfg.mode, 'ok', '执行成功，失败计数清零')
     }
+    denyCounts.set(agent, agentCounts)
     return next()
-  })
-
-  ctx.on('agent/turn-stopping', ({ agent }) => {
-    denyCounts.delete(agent)
   })
 }
